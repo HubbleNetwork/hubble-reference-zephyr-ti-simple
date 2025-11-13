@@ -1,0 +1,235 @@
+name: Build Application
+
+on:
+  workflow_dispatch:
+    inputs:
+      board:
+        description: "Board to build"
+        required: true
+      org_id:
+        description: "Organization ID (overrides github secret)"
+        required: false
+      api_token:
+        description: "API token for your organization (requires org_id be set)"
+        required: false
+      device_key:
+        description: "The device key to use"
+        required: false
+      device_name:
+        description: "Name to give the device (if registering)"
+        required: false
+      artifact_encryption_pw:
+        description: "Password to encrypt artifacts with (if HUBBLE_ARTIFACT_PASSWORD secret is not set)"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq p7zip-full
+
+      - name: Mask inputs
+        run: |
+          # Ensure sensitive data isn't echo'd in logs
+          API_TOKEN=$(jq -r '.inputs.api_token' $GITHUB_EVENT_PATH)
+          ORG_ID=$(jq -r '.inputs.org_id' $GITHUB_EVENT_PATH)
+          DEVICE_KEY=$(jq -r '.inputs.device_key' $GITHUB_EVENT_PATH)
+          PASSWORD=$(jq -r '.inputs.artifact_encryption_pw' $GITHUB_EVENT_PATH)
+
+          echo "::add-mask::$API_TOKEN"
+          echo "::add-mask::$ORG_ID"
+          echo "::add-mask::$DEVICE_KEY"
+          echo "::add-mask::$PASSWORD"
+
+      - name: Setup Zephyr project (SDK + modules)
+        uses: zephyrproject-rtos/action-zephyr-setup@v1
+        with:
+          # west.yml lives at the repo root
+          app-path: .
+          toolchains: arm-zephyr-eabi
+
+      - name: Get device name
+        id: set-device-name
+        env:
+          DEVICE_NAME: ${{ github.event.inputs.device_name }}
+        run: |
+          # If a device name is given, use that else give it a workflow-
+          # specific name.
+
+          if [ -n "$DEVICE_NAME" ]; then
+            echo "Using passed-in device name $DEVICE_NAME"
+          else
+            DEVICE_NAME="gh-${{ github.run_id }}"
+            echo "Generated device name $DEVICE_NAME"
+          fi
+          echo "name=$DEVICE_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Set device key based on workflow input
+        if: ${{ github.event.inputs.device_key != '' }}
+        env:
+          INPUT_KEY: ${{ github.event.inputs.device_key }}
+        run: |
+          echo "Device key set manually, bypassing registration"
+          echo "HUBBLE_DEVICE_KEY=$INPUT_KEY" \
+            >> "$GITHUB_ENV"
+
+      - name: Get credentials
+        if: ${{ github.event.inputs.device_key == '' }}
+        env:
+          INPUT_ORG_ID: ${{ github.event.inputs.org_id }}
+          INPUT_TOKEN: ${{ github.event.inputs.api_token }}
+          SECRET_ORG_ID: ${{ secrets.HUBBLE_ORG_ID }}
+          SECRET_TOKEN: ${{ secrets.HUBBLE_API_TOKEN }}
+        run: |
+          # Use the inputs for org ID + token first, then fall back
+          # on set secrets. If only org ID XOR token are set, then
+          # fail as we need both to be set in both situations
+
+          if [ -n "$INPUT_ORG_ID" ] && [ -n "$INPUT_TOKEN" ]; then
+            ORG_ID="$INPUT_ORG_ID"
+            TOKEN="$INPUT_TOKEN"
+          elif [ -n "$INPUT_ORG_ID" ]; then
+            echo "token must be set if org_id is set" >&2
+            exit 1
+          elif [ -n "$INPUT_TOKEN" ]; then
+            echo "org_id must be set if api_token is set" >&2
+            exit 1
+          elif [ -n "$SECRET_ORG_ID" ] && [ -n "$SECRET_TOKEN" ]; then
+            ORG_ID="$SECRET_ORG_ID"
+            TOKEN="$SECRET_TOKEN"
+          else
+            echo "No credentials provided, failing" >&2
+            exit 1
+          fi
+
+          echo "ORG_ID=$ORG_ID" >> "$GITHUB_ENV"
+          echo "TOKEN=$TOKEN" >> "$GITHUB_ENV"
+
+      - name: Register device
+        if: ${{ github.event.inputs.device_key == '' }}
+        env:
+          PROD_ENDPOINT: "https://api.hubble.com"
+          SBOX_ENDPOINT: "https://api-testing.hubblenetwork.io"
+          DEVICE_NAME: ${{ steps.set-device-name.outputs.name }}
+        run: |
+          # We need to check the device against both prod and test EPs
+          call_api() {
+            local endpoint="$1"
+            local body
+            body="$(jq -n --arg name "$DEVICE_NAME" '{
+              n_devices: 1,
+              encryption: "AES-256-CTR",
+              names: [$name],
+              tags: [{}]
+            }')"
+            wget --no-check-certificate --quiet \
+              --method=POST \
+              --timeout=30 \
+              --header='Content-Type: application/json' \
+              --header='Accept: application/json' \
+              --header="Authorization: Bearer $TOKEN" \
+              --body-data="$body" \
+              -O - \
+              "$endpoint/api/v2/org/$ORG_ID/devices"
+          }
+
+          if RESP=$(call_api "$PROD_ENDPOINT"); then
+            echo "Using production endpoint"
+          elif RESP=$(call_api "$SBOX_ENDPOINT"); then
+            echo "PROD failed, trying SBOX..." >&2
+          else
+            echo "Device registration failed" >&2
+            echo "Either there was a backend error or invalid" >&2
+            echo "credentials were provided." >&2
+            exit 1
+          fi
+
+          # Parse values
+          HUBBLE_DEVICE_ID=$(jq -r '.devices[0].device_id' <<<"$RESP")
+          HUBBLE_DEVICE_KEY=$(jq -r '.devices[0].key' <<<"$RESP")
+
+          echo "Registered device with ID $HUBBLE_DEVICE_ID"
+
+          # Mask key in logs
+          echo "::add-mask::$HUBBLE_DEVICE_KEY"
+
+          # Export for later steps
+          echo "HUBBLE_DEVICE_ID=$HUBBLE_DEVICE_ID" >> "$GITHUB_ENV"
+          echo "HUBBLE_DEVICE_KEY=$HUBBLE_DEVICE_KEY" >> "$GITHUB_ENV"
+
+      - name: Build application
+        env:
+          BOARD: ${{ github.event.inputs.board }}
+        run: |
+          set -euxo pipefail
+          TIME_MS=$(( $(date +%s) * 1000 ))
+          west build -p -b "$BOARD" . -- \
+            -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DKEY=\"$HUBBLE_DEVICE_KEY\""
+
+      - name: Sanitize board name
+        id: sanitize-board-name
+        env:
+          BOARD: ${{ github.event.inputs.board }}
+        run: |
+          # Sanitize the board name to remove /'s
+          # Original board value from workflow input, e.g. "nrf52dk/nrf52832"
+          # Replace all '/' with '_' → "nrf52dk_nrf52832"
+          BOARD_SANITIZED="${BOARD//\//_}"
+          echo "board=$BOARD_SANITIZED" >> "$GITHUB_OUTPUT"
+
+      - name: Select encryption password
+        id: select-password
+        env:
+          INPUT_PW: ${{ github.event.inputs.artifact_encryption_pw }}
+          SECRET_PW: ${{ secrets.HUBBLE_ARTIFACT_PASSWORD }}
+        run: |
+          # Select the password for encryption - priority of the workflow-dispatch
+          # password first then the secret.
+          if [ -n "$INPUT_PW" ]; then
+            echo "Using passed-in password for encrypting the artifacts"
+            PW="$INPUT_PW"
+          elif [ -n "$SECRET_PW" ]; then
+            echo "Using HUBBLE_ARTIFACT_PASSWORD secret to encrypt the artifacts"
+            PW="$SECRET_PW"
+          else
+            echo "No password given for encrypting artifacts." >&2
+            echo "Artifacts must be encrypted as they include a private key."  >&2
+            exit 1
+          fi
+          # This password should already be masked, but for extra security, ensure
+          # it at this stage as well
+          echo "::add-mask::$PW"
+          echo "pw=$PW" >> "$GITHUB_OUTPUT"
+
+      - name: Package and encrypt (AES-256)
+        id: zip-package
+        env:
+          ARTIFACT_PW: ${{ steps.select-password.outputs.pw }}
+          ZIP_NAME: ${{ steps.sanitize-board-name.outputs.board }}-build-${{ github.run_id }}.zip
+        run: |
+          # Zip the package with a reasonable name
+
+          echo "Zipping file to: $ZIP_NAME"
+          7z a -tzip "$ZIP_NAME" ./build \
+            -p"$ARTIFACT_PW" \
+            -mem=AES256
+          echo "file=$ZIP_NAME" >> "$GITHUB_OUTPUT"
+
+      - name: Upload binaries
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hubble-simple-app-${{ steps.set-device-name.outputs.name }}
+          path: |
+            ${{ steps.zip-package.outputs.file }}
+          if-no-files-found: ignore
