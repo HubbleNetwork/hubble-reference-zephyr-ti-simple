@@ -174,7 +174,7 @@ jobs:
           set -euxo pipefail
           TIME_MS=$(( $(date +%s) * 1000 ))
           west build -p -b "$BOARD" . -- \
-            -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DKEY=\"$HUBBLE_DEVICE_KEY\""
+            -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DHUBBLE_KEY=\"$HUBBLE_DEVICE_KEY\""
 
       - name: Sanitize board name
         id: sanitize-board-name

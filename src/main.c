@@ -1,4 +1,4 @@
-#include <hubble/ble.h>
+#include <hubble/hubble.h>
 #include <zephyr/kernel.h>
 #include <zephyr/bluetooth/bluetooth.h>
 #include <zephyr/kernel.h>
@@ -77,12 +77,12 @@ K_TIMER_DEFINE(blink_timer, blink_timer_cb, NULL);
 
 static int decode_master_key(void)
 {
-	size_t keylen = b64_decoded_size(STR(KEY));
+	size_t keylen = b64_decoded_size(STR(HUBBLE_KEY));
 	if (keylen != sizeof(master_key)) {
 		LOG_ERR("Given key incorrect size (%d bytes)", keylen);
 		return -1;
 	}
-	int ret = b64_decode(STR(KEY), master_key, sizeof(master_key));
+	int ret = b64_decode(STR(HUBBLE_KEY), master_key, sizeof(master_key));
 	if (ret != 0) {
 		LOG_ERR("Failed to decode given key");
 		return ret;
@@ -118,7 +118,7 @@ int main(void)
 		return err;
 	}
 
-	err = hubble_ble_init(TIME, master_key);
+	err = hubble_init(TIME, master_key);
 	if (err != 0) {
 		LOG_ERR("Failed to initialize Hubble BLE Network");
 		goto end;

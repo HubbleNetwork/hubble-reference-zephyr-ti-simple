@@ -156,7 +156,7 @@ export HUBBLE_DEVICE_KEY="<your-device-key-here>"
 # Build with west (replace BOARD with your board)
 BOARD=nrf52840dk/nrf52840
 TIME_MS=$(( $(date +%s) * 1000 ))
-west build -p -b "$BOARD" . -- -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DKEY=\"$HUBBLE_DEVICE_KEY\""
+west build -p -b "$BOARD" . -- -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DHUBBLE_KEY=\"$HUBBLE_DEVICE_KEY\""
 ```
 
 6. Flash (if you have a connected board):
