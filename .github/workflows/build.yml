@@ -6,6 +6,10 @@ on:
       board:
         description: "Board to build"
         required: true
+        type: choice
+        options:
+          - lp_em_cc2340r5
+          - lp_em_cc2340r53
       org_id:
         description: "Organization ID (overrides github secret)"
         required: false
@@ -51,12 +55,24 @@ jobs:
           echo "::add-mask::$DEVICE_KEY"
           echo "::add-mask::$PASSWORD"
 
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: 3.11
+
+      - name: Install TI tools for Zephyr
+        run: |
+          python -m pip install -U pip setuptools wheel
+          pip install pyelftools
+          pip install ti-simplelink-crc-tool
+
       - name: Setup Zephyr project (SDK + modules)
         uses: zephyrproject-rtos/action-zephyr-setup@v1
         with:
           # west.yml lives at the repo root
-          app-path: .
+          app-path: app
           toolchains: arm-zephyr-eabi
+          sdk-version: 0.16.9
 
       - name: Get device name
         id: set-device-name
@@ -128,7 +144,7 @@ jobs:
             local body
             body="$(jq -n --arg name "$DEVICE_NAME" '{
               n_devices: 1,
-              encryption: "AES-256-CTR",
+              encryption: "AES-128-CTR",
               names: [$name],
               tags: [{}]
             }')"
@@ -173,7 +189,7 @@ jobs:
         run: |
           set -euxo pipefail
           TIME_MS=$(( $(date +%s) * 1000 ))
-          west build -p -b "$BOARD" . -- \
+          west build -p -b "$BOARD" app -- \
             -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DHUBBLE_KEY=\"$HUBBLE_DEVICE_KEY\""
 
       - name: Sanitize board name
@@ -216,11 +232,15 @@ jobs:
         env:
           ARTIFACT_PW: ${{ steps.select-password.outputs.pw }}
           ZIP_NAME: ${{ steps.sanitize-board-name.outputs.board }}-build-${{ github.run_id }}.zip
+          DEVICE_NAME: ${{ steps.set-device-name.outputs.name }}
         run: |
           # Zip the package with a reasonable name
 
+          # Rename the hex file
+          mv ./build/zephyr/zephyr.hex "${DEVICE_NAME}-${HUBBLE_DEVICE_ID:-custom-key}.hex"
+
           echo "Zipping file to: $ZIP_NAME"
-          7z a -tzip "$ZIP_NAME" ./build \
+          7z a -tzip "$ZIP_NAME" "${DEVICE_NAME}-${HUBBLE_DEVICE_ID:-custom-key}.hex" \
             -p"$ARTIFACT_PW" \
             -mem=AES256
           echo "file=$ZIP_NAME" >> "$GITHUB_OUTPUT"

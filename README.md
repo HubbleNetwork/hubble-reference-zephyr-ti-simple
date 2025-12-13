@@ -22,7 +22,7 @@ The repository contains a GitHub Actions workflow named **Build Application** (`
 
 When running the workflow manually you will be asked to provide the following inputs (the workflow will also fall back to repository secrets when available):
 
-* `board` (required) — the Zephyr board to build for (e.g., `nrf52840dk/nrf52840`).
+* `board` (required) — the Zephyr board to build for (e.g., `lp_em_cc2340r5`).
 * `org_id` (optional) — your Hubble Organization ID (overrides secret). If set, `api_token` is required.
 * `api_token` (optional) — API token for your org (requires `org_id` to be set).
 * `device_key` (optional) — supply an existing device key to **bypass** registration.
@@ -63,9 +63,9 @@ High-level steps (see full workflow for details):
 You can dispatch the workflow from the command line with `gh`:
 
 ```bash
-# Example: builds for nrf52840dk/nrf52840 and supplies the required encryption password
+# Example: builds for lp_em_cc2340r5 and supplies the required encryption password
 gh workflow run .github/workflows/build.yml \
-  -f board=nrf52840dk/nrf52840 \
+  -f board=lp_em_cc2340r5 \
   -f org_id=<YOUR_ORG_ID> \
   -f api_token=<YOUR_API_TOKEN> \
   -f device_name=my-test-device \
@@ -108,29 +108,51 @@ If you prefer to build locally, follow these steps. These match the steps used b
 
 1. Prepare a Zephyr development environment. See the official Zephyr getting started guide for the platform you are using. The repository README gives the minimal steps to get the Zephyr workspace setup.
 
+```simplelink-zephyr``` requires Zephyr SDK verion 0.16.9 which can be downloaded from [here](https://github.com/zephyrproject-rtos/sdk-ng/releases/tag/v0.16.9).
+
+Before compiling the application you must tell Zephyr to use this version:
+
+```bash
+export ZEPHYR_SDK_INSTALL_DIR=/path/to/zephyr-sdk-0.16.9
+```
+
 2. Create a workspace and clone this repo (example):
 
 ```bash
 mkdir hubble-workspace
 cd hubble-workspace
-git clone https://github.com/HubbleNetwork/hubble-reference-zephyr-simple
+git clone https://github.com/HubbleNetwork/hubble-reference-zephyr-ti-simple
 ```
 
-3. (Optional) Create and activate a Python venv:
+3. Create and activate a Python venv running Python 3.11:
+
+Python 3.11 is required to use TI's ```crc-tool``` used to add a CRC to images. You must install and use Python 3.11 for this. On macOS this can be installed via brew:
 
 ```bash
-python -m venv .venv
+brew install python@3.11
+```
+
+This varies on other operating systems.
+
+Now create a virtual environment using this version of python:
+
+```bash
+python3.11 -m venv .venv
 source .venv/bin/activate
 ```
 
-4. Initialize west and update modules:
+4. Install TI's crc tooling
 
 ```bash
-# If you don't have west installed:
-pip install west
+python -m pip install --upgrade pip setuptools wheel
+python -m pip install -r hubble-reference-zephyr-ti-simple/requirements.txt
+```
 
+5. Initialize west and update modules:
+
+```bash
 # Initialize a local west workspace for this app
-west init -l hubble-reference-zephyr-simple
+west init -l hubble-reference-zephyr-ti-simple
 west update
 
 # Export the Zephyr CMake package
@@ -145,24 +167,19 @@ west sdk install
 
 These steps are the same high-level steps used by the workflow to prepare Zephyr.
 
-5. Build the app (local device key example):
+6. Build the app (local device key example):
 
 The example application expects a device key to be available to the binary as the `KEY` macro. The workflow embeds the key by passing `-DEXTRA_CPPFLAGS` to west; replicate this locally as follows:
 
 ```bash
+cd hubble-reference-zephyr-ti-simple
+
 # Example: embed a device key and the build TIME in milliseconds
-export HUBBLE_DEVICE_KEY="<your-device-key-here>"
+HUBBLE_DEVICE_KEY="<your-device-key-here>"
 
 # Build with west (replace BOARD with your board)
-BOARD=nrf52840dk/nrf52840
-TIME_MS=$(( $(date +%s) * 1000 ))
-west build -p -b "$BOARD" . -- -DEXTRA_CPPFLAGS="-DTIME=$TIME_MS -DHUBBLE_KEY=\"$HUBBLE_DEVICE_KEY\""
-```
-
-6. Flash (if you have a connected board):
-
-```bash
-west flash
+BOARD=lp_em_cc2340r5
+west build -p -b "$BOARD" app -- -DEXTRA_CPPFLAGS="-DTIME=$(( $(date +%s) * 1000 )) -DHUBBLE_KEY=\"$HUBBLE_DEVICE_KEY\""
 ```
 
 > **Note:** The workflow embeds the device key into the binary with:
@@ -173,30 +190,14 @@ west flash
 >
 > which is the same approach shown above. That means any key you embed is compiled into the firmware — see the Security section below.
 
+7. Flash the app via TI UniFlash
+
+Use TI's UniFlash software to flash the ```.hex``` file from ```build/zephyr/zephyr.hex```.
+
+
 ### `prj.conf` and important build-time configuration
 
-This application uses a small `prj.conf` to enable the shell, Bluetooth and logging. The example `prj.conf` in this repository configures logging, Bluetooth peripheral role, power management, and defines the main stack size. You can find those settings in `prj.conf`. For reference the file contains entries such as:
-
-```ini
-# Reasonable SHELL configuration for this application
-CONFIG_SHELL=y
-
-# Logging
-CONFIG_LOG=y
-CONFIG_LOG_BACKEND_UART=y
-
-# Hubble Network
-CONFIG_HUBBLE_BLE_NETWORK=y
-
-# Bluetooth dependencies
-CONFIG_BT=y
-CONFIG_BT_PERIPHERAL=y
-
-CONFIG_MAIN_STACK_SIZE=2048
-```
-
-(See `prj.conf` for the complete configuration.)
-
+This application uses a small `prj.conf` to enable the shell, Bluetooth and logging. The example `prj.conf` in this repository configures logging, Bluetooth peripheral role, power management, and defines the main stack size. You can find those settings in `prj.conf`.
 
 ## Hubble credentials and device registration
 

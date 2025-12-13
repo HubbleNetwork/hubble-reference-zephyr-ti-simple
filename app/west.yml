@@ -4,15 +4,17 @@
 manifest:
 
   remotes:
-    - name: zephyrproject-rtos
-      url-base: https://github.com/zephyrproject-rtos
+    - name: simplelink-zephyr
+      url-base: https://github.com/TexasInstruments
     - name: hubble
       url-base: https://github.com/HubbleNetwork
 
+
   projects:
-    - name: zephyr
-      remote: zephyrproject-rtos
-      revision: main
+    - name: simplelink-zephyr
+      remote: simplelink-zephyr
+      revision: v3.7.0-ti-9.10
+      path: zephyr
       import: true
       west-commands: scripts/west-commands.yml
     - name: hubblenetwork-sdk
