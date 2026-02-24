@@ -3,3 +3,10 @@
 # macOS
 .DS_Store
 **/.DS_Store
+
+zephyr/
+.west/
+bootloader/
+modules/
+tools/
+zephyr/
