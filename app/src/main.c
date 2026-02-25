@@ -141,8 +141,14 @@ int main(void)
 		size_t out_len = HUBBLE_USER_BUFFER_LEN;
 #ifdef CONFIG_APP_TEMPERATURE
 		int16_t temp_c = Temperature_getTemperature();
+
+		uint8_t payload[2] = {
+			0x02,              /* Type ID: Low-Res Temp */
+			(uint8_t)temp_c    /* Temperature as int8_t (1°C units) */
+		};
+
 		LOG_DBG("Die temperature: %d C", temp_c);
-		err = hubble_ble_advertise_get((const uint8_t *)&temp_c, sizeof(temp_c),
+		err = hubble_ble_advertise_get(payload, sizeof(payload),
 					       _hubble_user_buffer, &out_len);
 #else
 		err = hubble_ble_advertise_get(NULL, 0, _hubble_user_buffer, &out_len);
