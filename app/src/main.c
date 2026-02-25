@@ -10,6 +10,10 @@
 
 #include "b64.h"
 
+#ifdef CONFIG_APP_TEMPERATURE
+#include <ti/drivers/Temperature.h>
+#endif
+
 LOG_MODULE_REGISTER(main, CONFIG_APP_LOG_LEVEL);
 
 /* Macro helpers to turn a macro value into a string literal */
@@ -135,7 +139,14 @@ int main(void)
 
 	while (1) {
 		size_t out_len = HUBBLE_USER_BUFFER_LEN;
+#ifdef CONFIG_APP_TEMPERATURE
+		int16_t temp_c = Temperature_getTemperature();
+		LOG_DBG("Die temperature: %d C", temp_c);
+		err = hubble_ble_advertise_get((const uint8_t *)&temp_c, sizeof(temp_c),
+					       _hubble_user_buffer, &out_len);
+#else
 		err = hubble_ble_advertise_get(NULL, 0, _hubble_user_buffer, &out_len);
+#endif
 		if (err != 0) {
 			LOG_ERR("Failed to get the advertisement data");
 			goto end;
