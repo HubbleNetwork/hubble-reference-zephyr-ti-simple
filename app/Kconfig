@@ -13,3 +13,11 @@ endmenu
 module = APP
 module-str = APP
 source "subsys/logging/Kconfig.template.log_config"
+
+config APP_TEMPERATURE
+	bool "Include die temperature in BLE advertisement"
+	default n
+	help
+	  When enabled, reads the die temperature using the TI SDK
+	  Temperature driver and includes it in the Hubble BLE
+	  advertisement payload as a signed int16 (Celsius).

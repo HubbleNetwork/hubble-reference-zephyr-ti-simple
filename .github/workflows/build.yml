@@ -10,6 +10,7 @@ on:
         options:
           - lp_em_cc2340r5
           - lp_em_cc2340r53
+          - lp_em_cc2755p10
       org_id:
         description: "Organization ID (overrides github secret)"
         required: false
