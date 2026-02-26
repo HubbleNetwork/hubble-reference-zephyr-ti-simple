@@ -142,6 +142,13 @@ int main(void)
 #ifdef CONFIG_APP_TEMPERATURE
 		int16_t temp_c = Temperature_getTemperature();
 
+		/* Clamp to int8_t range (-128 to 127) */
+		if (temp_c > 127) {
+			temp_c = 127;
+		} else if (temp_c < -128) {
+			temp_c = -128;
+		}
+
 		uint8_t payload[2] = {
 			0x02,              /* Type ID: Low-Res Temp */
 			(uint8_t)temp_c    /* Temperature as int8_t (1°C units) */
